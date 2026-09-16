@@ -17,6 +17,9 @@ REPO_RAW="https://raw.githubusercontent.com/xxbb678/dafaguo/main"
 APP_DIR="${NEOHEBERG_DIR:-/opt/neoheberg-afk}"
 VENV="$APP_DIR/venv"
 SCRIPT="$APP_DIR/neoheberg.py"
+# 进程匹配模式：兼容「相对路径启动」(start.sh： ./venv/bin/python ./neoheberg.py)
+#           与「绝对路径启动」(菜单： $VENV/bin/python $SCRIPT)，避免状态误报为「已安装未运行」
+RUN_PATTERN='venv/bin/python.*neoheberg\.py'
 LOG="$APP_DIR/neoheberg.log"
 ENV_FILE="$APP_DIR/env"
 PID_FILE="$APP_DIR/neoheberg.pid"
@@ -441,7 +444,7 @@ menu_account() {
     write_env_file
     ok "账号密码已保存到 $ENV_FILE"
 
-    if pgrep -f "$SCRIPT" >/dev/null 2>&1; then
+    if pgrep -f "$RUN_PATTERN" >/dev/null 2>&1; then
         printf "账号修改需重启才生效，是否立即重启？[y/N]: "
         local rr
         read -r rr || rr=""
@@ -557,7 +560,7 @@ install_gui_libs() {
 
 # ---------------- 启停 ----------------
 start_bot() {
-    if pgrep -f "$SCRIPT" >/dev/null 2>&1; then
+    if pgrep -f "$RUN_PATTERN" >/dev/null 2>&1; then
         warn "已在运行中，无需重复启动"
         return 0
     fi
@@ -587,7 +590,7 @@ start_bot() {
     fi
     echo $! > "$PID_FILE"
     sleep 3
-    if pgrep -f "$SCRIPT" >/dev/null 2>&1; then
+    if pgrep -f "$RUN_PATTERN" >/dev/null 2>&1; then
         ok "已后台启动（PID $(cat "$PID_FILE" 2>/dev/null)）"
     else
         err "启动失败，请看日志: tail -20 $LOG"
@@ -599,7 +602,8 @@ stop_bot() {
         kill "$(cat "$PID_FILE")" 2>/dev/null || true
         rm -f "$PID_FILE"
     fi
-    pkill -f "$SCRIPT" 2>/dev/null || true
+    pkill -f "$RUN_PATTERN" 2>/dev/null || true
+    pkill -f "xvfb-run.*neoheberg\.py" 2>/dev/null || true
     ok "已停止"
 }
 
@@ -650,7 +654,7 @@ ${_test_text}"
         warn "未填写完整，已清空 TG 配置"
     fi
 
-    if pgrep -f "$SCRIPT" >/dev/null 2>&1; then
+    if pgrep -f "$RUN_PATTERN" >/dev/null 2>&1; then
         printf "通知修改需重启才生效，是否立即重启？[y/N]: "
         local rr
         read -r rr || rr=""
@@ -672,8 +676,8 @@ menu_status() {
     fi
 
     load_env
-    if pgrep -f "$SCRIPT" >/dev/null 2>&1; then
-        ok "进程：运行中 (PID: $(pgrep -f "$SCRIPT" | tr '\n' ' '))"
+    if pgrep -f "$RUN_PATTERN" >/dev/null 2>&1; then
+        ok "进程：运行中 (PID: $(pgrep -f "$RUN_PATTERN" | tr '\n' ' '))"
     else
         warn "进程：未运行"
     fi
@@ -1097,7 +1101,7 @@ menu_update() {
     ok "主脚本已更新"
 
     # 若在运行中，询问是否重启
-    if pgrep -f "$SCRIPT" >/dev/null 2>&1; then
+    if pgrep -f "$RUN_PATTERN" >/dev/null 2>&1; then
         printf "脚本已更新，是否立即重启？[y/N]: "
         local rr
         read -r rr || rr=""
@@ -1130,7 +1134,7 @@ adapt_script_for_old_python_check() {
 menu() {
     while true; do
         local st
-        if pgrep -f "${SCRIPT}" >/dev/null 2>&1; then
+        if pgrep -f "$RUN_PATTERN" >/dev/null 2>&1; then
             st="${GREEN}运行中${NC}"
         elif [ -d "$APP_DIR" ]; then
             st="${YELLOW}已安装未运行${NC}"

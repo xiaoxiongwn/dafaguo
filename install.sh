@@ -753,7 +753,7 @@ menu_balance() {
     cd "$APP_DIR"
     _BALPY="$APP_DIR/.balance_check.py"
     cat > "$_BALPY" <<'PYEOF'
-import os, sys, time
+import os, sys, time, glob
 
 # 直接执行主脚本源码，但先设 __name__ 非 __main__，避开 main() 与 sys.exit
 _script = os.environ.get("NH_SCRIPT", "neoheberg.py")
@@ -770,10 +770,11 @@ for _k, _v in _ns.items():
         setattr(nh, _k, _v)
 
 def fmt(v):
-    return f"{v:.4f}" if isinstance(v, (int, float)) else str(v)
+    return f"{v:.6f}" if isinstance(v, (int, float)) else str(v)
+
 
 def _merge_save(state, updates):
-    """只合并本进程负责的字段：先重读磁盘再写回，避免用旧快照把主脚本的 day_date / rounds / day_rounds 覆盖掉。"""
+    """只合并本进程负责的字段：先重读磁盘再写回，避免用旧快照把主脚本的 rounds 覆盖掉。"""
     try:
         disk = nh.load_state()
     except Exception:
@@ -782,51 +783,68 @@ def _merge_save(state, updates):
     nh.save_state(disk)
     state.update(updates)
 
+
 state = nh.load_state()
-s = None
+page = None
 last = None
 start = None
-rounds0 = state.get("rounds", 0)
 
 try:
-    s = nh.make_session(state)
-    try:
-        bal = nh._get_balance(s)
-    except PermissionError:
-        print("Cookie 失效，正在拉起浏览器重新登录...", flush=True)
-        s = nh.run_browser_extractor(state)
-        bal = nh._get_balance(s)
+    opts = nh.FirefoxOptions()
+    _ff = sorted(glob.glob("/root/.cache/ruyipage/browsers/firefox-*/firefox/firefox"))
+    if _ff:
+        opts.set_browser_path(_ff[-1])
+    if nh.PROFILE_DIR:
+        opts.set_profile(nh.PROFILE_DIR)
+    if nh.PROXY_URL:
+        opts.set_proxy(nh.PROXY_URL)
+    opts.headless(False)
+    page = nh.FirefoxPage(opts)
+
+    page.get(nh.ADS_URL)
+    time.sleep(5)
+    nh.wait_for_cloudflare(page, timeout=60)
+    nh.ensure_logged_in(page)
+
+    bal = nh.get_balance_dom(page, wait=25)
+    seen = nh.get_seen_today(page)
+    if bal <= 0:
+        raise RuntimeError("未能读取余额")
     start = bal
     last = bal
-    _merge_save(state, {"saved_cookies": s.cookies.get_dict(), "last_balance": bal})
-    print(f"初始余额: {fmt(bal)} 🪙", flush=True)
+    _merge_save(state, {"last_balance": bal})
+    print(f"初始余额: {fmt(bal)} 🪙    今日已看 {seen}/100", flush=True)
     print("─" * 36, flush=True)
 except Exception as e:
     print(f"❌ 查询失败: {type(e).__name__}: {e}", flush=True)
+    if page:
+        try: page.quit()
+        except Exception: pass
     sys.exit(1)
 
-n = 0
-while True:
-    time.sleep(5)
-    n += 1
-    ts = time.strftime("%H:%M:%S")
-    try:
-        bal = nh._get_balance(s)
-        delta = bal - last if last is not None else 0.0
-        total = bal - start if start is not None else 0.0
-        arrow = "↑" if delta > 0 else ("↓" if delta < 0 else "─")
-        print(f"[{ts}] 余额 {fmt(bal)} 🪙  ({arrow}{fmt(abs(delta))})  本次累计 +{fmt(total)}", flush=True)
-        last = bal
-        _merge_save(state, {"last_balance": bal, "saved_cookies": s.cookies.get_dict()})
-    except PermissionError:
-        print(f"[{ts}] Cookie 失效，重新登录...", flush=True)
+try:
+    while True:
+        time.sleep(5)
+        ts = time.strftime("%H:%M:%S")
         try:
-            s = nh.run_browser_extractor(state)
-            last = None
+            page.get(nh.ADS_URL)
+            time.sleep(3)
+            bal = nh.get_balance_dom(page, wait=15)
+            seen = nh.get_seen_today(page)
+            delta = bal - last if last is not None else 0.0
+            total = bal - start if start is not None else 0.0
+            arrow = "↑" if delta > 0 else ("↓" if delta < 0 else "─")
+            print(f"[{ts}] 余额 {fmt(bal)} 🪙  ({arrow}{fmt(abs(delta))})  本次累计 +{fmt(total)}  已看 {seen}/100", flush=True)
+            last = bal
+            _merge_save(state, {"last_balance": bal})
         except Exception as e:
-            print(f"[{ts}] 重登失败: {e}", flush=True)
-    except Exception as e:
-        print(f"[{ts}] 读取失败: {type(e).__name__}", flush=True)
+            print(f"[{ts}] 读取失败: {type(e).__name__}", flush=True)
+except KeyboardInterrupt:
+    pass
+finally:
+    if page:
+        try: page.quit()
+        except Exception: pass
 PYEOF
 
     xvfb-run -a -s "-screen 0 1024x768x24" env \

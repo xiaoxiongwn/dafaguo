@@ -10,6 +10,40 @@
 
 > 仅供学习交流，使用风险自负。
 
+## 🚀 一键安装
+
+    bash <(curl -fsSL https://raw.githubusercontent.com/xxbb678/dafaguo/main/install.sh)
+
+安装过程自动完成：装好 python3-venv / xvfb / xauth → 创建虚拟环境 → 安装 ruyipage → 下载 Firefox 运行时（约百兆，首次较慢）。
+
+## 一键运行
+
+传入凭证并后台启动：
+
+    EMAIL='你的邮箱' PASSWORD='你的密码' \
+      TG_BOT_TOKEN='机器人 token' TG_CHAT_ID='chatid' \
+      bash <(curl -fsSL https://raw.githubusercontent.com/xxbb678/dafaguo/main/install.sh) run
+
+凭证会写入 `/opt/neoheberg-afk/env`（权限 600），下次只需 `bash install.sh run`，无需重输。
+
+交互菜单：直接运行 `bash install.sh`（无参数）。
+
+## 命令
+
+    install    安装依赖与浏览器运行时（默认）
+    run        启动挂机（后台）
+    account    填写账号密码
+    tg         配置 Telegram 通知（含节点名称）
+    balance    实时查余额（每 5 秒刷新）
+    status     查看运行状态与最近日志
+    schedule   每日定时挂机
+    update     更新主脚本到最新版（不动依赖）
+    uninstall  卸载（进程、凭证、依赖全删）
+
+更新主脚本（已安装的机器）：
+
+    bash <(curl -fsSL https://raw.githubusercontent.com/xxbb678/dafaguo/main/install.sh) update
+
 ## 环境要求
 
 - Linux（测试于 Debian/Ubuntu），需能访问目标站点
@@ -26,20 +60,6 @@ apt install -y xvfb
 
 脚本会自动定位 `~/.cache/ruyipage/browsers/firefox-*/firefox/firefox`，无需硬编码路径。
 
-## 运行
-
-```bash
-set -a && . ./env && set +a
-xvfb-run -a -s "-screen 0 1024x768x24" ./venv/bin/python ./neoheberg.py
-```
-
-后台运行：
-
-```bash
-cd /opt/neoheberg-afk && setsid nohup xvfb-run -a -s "-screen 0 1024x768x24" \
-  ./venv/bin/python ./neoheberg.py > neoheberg.log 2>&1 < /dev/null &
-```
-
 ## 环境变量
 
 写入 `env` 文件（权限 600），或直接导出：
@@ -50,6 +70,7 @@ cd /opt/neoheberg-afk && setsid nohup xvfb-run -a -s "-screen 0 1024x768x24" \
 | `PASSWORD` | 是 | 登录密码 |
 | `TG_BOT_TOKEN` | 否 | Telegram 机器人 Token |
 | `TG_CHAT_ID` | 否 | Telegram chat id |
+| `NOTIFY_NAME` | 否 | 节点名称，多台机器共用同一 TG 机器人时用于区分 |
 | `PROXY` | 否 | 如 `socks5://user:pass@host:port` |
 | `BROWSER_WORK_DIR` | 否 | 工作目录，默认 `/home/browser/browser-work` |
 | `BROWSER_USER_DATA_DIR` | 否 | 指定 Firefox profile 目录（保留登录态）|

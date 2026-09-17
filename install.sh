@@ -337,12 +337,12 @@ do_install_py_deps() {
         fi
     fi
 
-    info "升级 pip 并安装 curl_cffi / ruyipage（首次较慢）..."
+    info "升级 pip 并安装 ruyipage（首次较慢）..."
     $pip install --quiet --upgrade pip >/dev/null 2>&1 || true
-    $pip install --quiet curl_cffi ruyipage || { err "Python 依赖安装失败"; return 1; }
+    $pip install --quiet ruyipage || { err "Python 依赖安装失败"; return 1; }
 
     # 提前验证导入，避免后续运行才报错
-    "$VENV/bin/python" -c 'import curl_cffi, ruyipage' 2>/dev/null || { err "依赖导入失败，请看上方 pip 输出"; return 1; }
+    "$VENV/bin/python" -c 'import ruyipage' 2>/dev/null || { err "依赖导入失败，请看上方 pip 输出"; return 1; }
     ok "Python 依赖就绪"
     return 0
 }

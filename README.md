@@ -77,13 +77,21 @@ chmod 600 account-a.env
 
 ```bash
 ./multi-account.sh start account-a       # 立即启动指定账号
+./multi-account.sh start                 # 立即启动全部账号
+./multi-account.sh start a b c           # 批量启动指定多个账号
 ./multi-account.sh stop account-a        # 停止指定账号
+./multi-account.sh stop                  # 停止全部账号
+./multi-account.sh restart               # 重启全部账号
+./multi-account.sh restart account-a     # 重启指定账号（可传多个）
 ./multi-account.sh status account-a      # 查看单个账号状态
 ./multi-account.sh status                # 查看全部账号状态
+./multi-account.sh list                  # 列出全部账号名
 ./multi-account.sh delete account-a      # 停止并删除账号及其独立数据
 ./multi-account.sh install-timers         # 安装并启用所有账号的用户级定时器
 ./multi-account.sh remove-timers          # 停用并移除多账号定时器
 ```
+
+批量命令中遇到不存在的账号名会跳过并提示，其余账号正常处理；`start`/`stop`/`restart` 全部成功才返回 0。
 
 账号数据默认保存在 `~/.local/share/dafaguo-multi/accounts/<账号名>/`。环境文件会复制为权限 `600` 的 `account.env`，命令输出和 systemd 单元均不会包含密码。账号名只允许字母、数字、下划线和连字符，防止路径穿越。
 

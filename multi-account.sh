@@ -13,9 +13,11 @@ usage() {
 用法：
   multi-account.sh add <账号名> <HH:MM> <环境文件>
   multi-account.sh delete <账号名>
-  multi-account.sh start <账号名>
-  multi-account.sh stop <账号名>
+  multi-account.sh start [账号名...]      # 不给名字则启动全部
+  multi-account.sh stop [账号名...]       # 不给名字则停止全部
+  multi-account.sh restart [账号名...]     # 重启（不给名字则全部）
   multi-account.sh status [账号名]
+  multi-account.sh list                    # 列出全部账号
   multi-account.sh install-timers
   multi-account.sh remove-timers
 EOF
@@ -27,6 +29,97 @@ valid_time() { [[ ${1:-} =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; }
 account_dir() { printf '%s/%s' "$ACCOUNTS_DIR" "$1"; }
 require_name() { valid_name "${1:-}" || fail '账号名只能包含字母、数字、下划线和连字符，且不能以符号开头'; }
 require_account() { require_name "$1"; [[ -d "$(account_dir "$1")" ]] || fail "账号不存在：$1"; }
+account_exists() { valid_name "${1:-}" && [[ -d "$(account_dir "$1")" ]]; }
+all_account_names() {
+  local dir
+  [[ -d "$ACCOUNTS_DIR" ]] || return 0
+  for dir in "$ACCOUNTS_DIR"/*; do
+    [[ -d "$dir" ]] || continue
+    printf '%s\n' "${dir##*/}"
+  done
+}
+has_accounts() { [[ -d "$ACCOUNTS_DIR" ]] && compgen -G "$ACCOUNTS_DIR/*" >/dev/null; }
+
+start_batch() {
+  local name failed=0
+  if (( $# > 0 )); then
+    for name in "$@"; do
+      if account_exists "$name"; then
+        start_account "$name" || failed=1
+      else
+        printf '错误：账号不存在：%s（跳过）\n' "${name:-}" >&2
+        failed=1
+      fi
+    done
+  else
+    has_accounts || { printf '尚未添加账号\n'; return 0; }
+    for name in $(all_account_names); do
+      start_account "$name" || failed=1
+    done
+  fi
+  if (( failed )); then return 1; fi
+  return 0
+}
+
+stop_batch() {
+  local name failed=0
+  if (( $# > 0 )); then
+    for name in "$@"; do
+      if account_exists "$name"; then
+        stop_account "$name" || failed=1
+      else
+        printf '错误：账号不存在：%s（跳过）\n' "${name:-}" >&2
+        failed=1
+      fi
+    done
+  else
+    has_accounts || { printf '尚未添加账号\n'; return 0; }
+    for name in $(all_account_names); do
+      stop_account "$name" || failed=1
+    done
+  fi
+  if (( failed )); then return 1; fi
+  return 0
+}
+
+restart_batch() {
+  local name failed=0 targets=()
+  if (( $# > 0 )); then
+    for name in "$@"; do
+      if account_exists "$name"; then
+        targets+=("$name")
+      else
+        printf '错误：账号不存在：%s（跳过）\n' "${name:-}" >&2
+        failed=1
+      fi
+    done
+  else
+    for name in $(all_account_names); do
+      targets+=("$name")
+    done
+  fi
+  if (( ${#targets[@]} == 0 )); then
+    if (( $# > 0 )); then return 1; fi
+    printf '尚未添加账号\n'
+    return 0
+  fi
+  for name in "${targets[@]}"; do
+    stop_account "$name" || failed=1
+    start_account "$name" || failed=1
+  done
+  if (( failed )); then return 1; fi
+  return 0
+}
+
+list_accounts() {
+  local name any=0
+  for name in $(all_account_names); do
+    any=1
+    printf '%s\n' "$name"
+  done
+  if (( ! any )); then printf '尚未添加账号\n'; fi
+  return 0
+}
 
 reload_systemd() {
   if [[ $SYSTEMD_DIR == "$HOME/.config/systemd/user" ]] && command -v systemctl >/dev/null 2>&1; then
@@ -201,9 +294,11 @@ shift || true
 case "$command" in
   add) add_account "$@" ;;
   delete|remove) delete_account "$@" ;;
-  start) start_account "$@" ;;
-  stop) stop_account "$@" ;;
+  start) start_batch "$@" ;;
+  stop) stop_batch "$@" ;;
+  restart) restart_batch "$@" ;;
   status) status_accounts "$@" ;;
+  list) list_accounts "$@" ;;
   install-timers) install_timers "$@" ;;
   remove-timers) remove_timers "$@" ;;
   -h|--help|help|'') usage ;;

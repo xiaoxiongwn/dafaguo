@@ -1363,26 +1363,20 @@ menu() {
         echo -e " 安装目录: $APP_DIR"
         echo -e "${GREEN}===============================================${NC}"
         echo -e " ${CYAN}[1]${NC} 安装依赖"
-        echo -e " ${CYAN}[2]${NC} 配置 Telegram 通知"
-        echo -e " ${CYAN}[3]${NC} 查余额"
-        echo -e " ${CYAN}[4]${NC} 每日定时挂机"
-        echo -e " ${CYAN}[5]${NC} 运行状态"
-        echo -e " ${CYAN}[6]${NC} 卸载"
-        echo -e " ${CYAN}[8]${NC} 多账号管理"
+        echo -e " ${CYAN}[2]${NC} 电报通知"
+        echo -e " ${CYAN}[3]${NC} 账号管理"
+        echo -e " ${CYAN}[4]${NC} 卸载脚本"
         echo -e " ${CYAN}[0]${NC} 退出脚本"
         echo -e "${GREEN}===============================================${NC}"
-        printf "请输入数字选择 [0-8]: "
+        printf "请输入数字选择 [0-4]: "
         local choice
         read -r choice || continue
 
         case "$choice" in
             1) menu_install ;;
             2) menu_tg ;;
-            3) menu_balance ;;
-            4) menu_schedule ;;
-            5) menu_status ;;
-            6) menu_uninstall ;;
-            8) menu_multi ;;
+            3) menu_multi ;;
+            4) menu_uninstall ;;
             0) echo "已退出"; exit 0 ;;
             *) err "无效选择"; sleep 1 ;;
         esac

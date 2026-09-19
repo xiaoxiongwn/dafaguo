@@ -415,7 +415,7 @@ menu_install() {
 
     do_install_deps || return 1
     ok "安装完成"
-    echo "    下一步：选菜单 [2] 填写账号密码"
+    echo "    下一步：选菜单 [8] 多账号管理 或直接运行 multi-account.sh add"
 }
 
 # ---------- 账号密码 ----------
@@ -749,7 +749,7 @@ menu_balance() {
         return 1
     fi
     if [ ! -f "$ENV_FILE" ]; then
-        err "未配置账号密码，请先选菜单 [2]"
+        err "未配置账号密码，请先进入多账号管理添加账号"
         return 1
     fi
 

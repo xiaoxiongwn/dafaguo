@@ -1,7 +1,7 @@
 #!/bin/bash
 # 在容器内启动挂机（禁沙箱 + 脱离会话）
 # 启动前强制清理所有旧实例，避免多实例并发导致兑换不结算。
-cd /opt/neoheberg-afk || exit 1
+cd "$APP_DIR" || exit 1
 
 # ── 1. 杀掉所有旧实例（python 主程序 + xvfb-run 包装进程）──
 pkill -9 -f "venv/bin/python.*neoheberg.py" 2>/dev/null

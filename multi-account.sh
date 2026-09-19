@@ -16,6 +16,8 @@ usage() {
   multi-account.sh start [账号名...]      # 不给名字则启动全部
   multi-account.sh stop [账号名...]       # 不给名字则停止全部
   multi-account.sh restart [账号名...]     # 重启（不给名字则全部）
+  multi-account.sh set-proxy <账号名> <代理地址>  # 设置账号代理，如 socks5://user:pass@host:port
+  multi-account.sh set-proxy <账号名>               # 清除账号代理
   multi-account.sh status [账号名]
   multi-account.sh list                    # 列出全部账号
   multi-account.sh install-timers
@@ -25,6 +27,20 @@ EOF
 
 fail() { printf '错误：%s\n' "$*" >&2; exit 1; }
 valid_name() { [[ ${1:-} =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]; }
+# 展示用代理地址：隐藏 userinfo 里的密码，避免密码出现在终端输出
+mask_proxy() {
+  local p=${1:-} proto rest userinfo hostpart
+  [[ $p == *"//"* && $p == *@* ]] || { printf '%s' "$p"; return; }
+  proto=${p%%://*}
+  rest=${p#*://}
+  userinfo=${rest%%@*}
+  hostpart=${rest#*@}
+  if [[ $userinfo == *:* ]]; then
+    printf '%s://%s:****@%s' "$proto" "${userinfo%%:*}" "$hostpart"
+  else
+    printf '%s://%s@%s' "$proto" "$userinfo" "$hostpart"
+  fi
+}
 valid_time() { [[ ${1:-} =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; }
 account_dir() { printf '%s/%s' "$ACCOUNTS_DIR" "$1"; }
 require_name() { valid_name "${1:-}" || fail '账号名只能包含字母、数字、下划线和连字符，且不能以符号开头'; }
@@ -221,21 +237,66 @@ stop_account() {
   printf '已停止账号：%s\n' "$name"
 }
 
+set_proxy() {
+  local name=${1:-} proxy=${2:-} dir env_file line tmp found=0
+  require_account "$name"
+  dir=$(account_dir "$name")
+  env_file="$dir/account.env"
+  [[ -f "$env_file" ]] || fail "账号凭证文件不存在：$env_file"
+  tmp=$(mktemp) || fail '无法创建临时文件'
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ $line =~ ^[[:space:]]*PROXY[[:space:]]*= ]]; then
+      found=1
+    else
+      printf '%s\n' "$line" >> "$tmp"
+    fi
+  done < "$env_file"
+  if [[ -n "$proxy" ]]; then
+    printf 'PROXY=%q\n' "$proxy" >> "$tmp"
+  elif (( found )); then
+    : # 已删除原 PROXY 行
+  else
+    printf 'PROXY=\n' >> "$tmp"
+  fi
+  cat "$tmp" > "$env_file"
+  chmod 600 "$env_file"
+  rm -f "$tmp"
+  if [[ -n "$proxy" ]]; then
+    printf '账号 %s 代理已设置：%s\n' "$name" "$(mask_proxy "$proxy")"
+  else
+    printf '账号 %s 代理已清除\n' "$name"
+  fi
+  printf '重启该账号后生效：multi-account.sh restart %s\n' "$name"
+}
+
 status_one() {
-  local name=$1 dir pid_file pid schedule
+  local name=$1 dir pid_file pid schedule proxy_line proxy_val
   require_account "$name"
   dir=$(account_dir "$name")
   schedule=$(<"$dir/schedule")
+  proxy_val=""
+  if [[ -f "$dir/account.env" ]]; then
+    proxy_line=$(grep -E '^[[:space:]]*PROXY[[:space:]]*=' "$dir/account.env" 2>/dev/null | tail -1)
+    if [[ -n "$proxy_line" ]]; then
+      proxy_val=${proxy_line#*=}
+      proxy_val=${proxy_val#\"}; proxy_val=${proxy_val%\"}
+      proxy_val=${proxy_val#\'}; proxy_val=${proxy_val%\'}
+    fi
+  fi
   pid_file="$dir/run.pid"
+  if [[ -n "$proxy_val" ]]; then
+    proxy_val=$(mask_proxy "$proxy_val")
+  fi
   if [[ -f "$pid_file" ]]; then
     read -r pid < "$pid_file" || true
     if [[ ${pid:-} =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
-      printf '%s：运行中，PID %s，每日 %s\n' "$name" "$pid" "$schedule"
+      printf '%s：运行中，PID %s，每日 %s，代理 %s\n' \
+        "$name" "$pid" "$schedule" "${proxy_val:-(无)}"
       return
     fi
     rm -f "$pid_file"
   fi
-  printf '%s：未运行，每日 %s\n' "$name" "$schedule"
+  printf '%s：未运行，每日 %s，代理 %s\n' "$name" "$schedule" "${proxy_val:-(无)}"
 }
 
 status_accounts() {
@@ -314,6 +375,7 @@ case "$command" in
   start) start_batch "$@" ;;
   stop) stop_batch "$@" ;;
   restart) restart_batch "$@" ;;
+  set-proxy|proxy) set_proxy "$@" ;;
   status) status_accounts "$@" ;;
   list) list_accounts "$@" ;;
   install-timers) install_timers "$@" ;;

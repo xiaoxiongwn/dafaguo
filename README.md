@@ -24,7 +24,7 @@
       TG_BOT_TOKEN='机器人 token' TG_CHAT_ID='chatid' \
       bash <(curl -fsSL https://raw.githubusercontent.com/xxbb678/dafaguo/main/install.sh) run
 
-凭证会写入 `/opt/neoheberg-afk/env`（权限 600），下次只需 `bash install.sh run`，无需重输。
+凭证会写入 `/root/dafaguo/env`（权限 600），下次只需 `bash install.sh run`，无需重输。
 
 交互菜单：直接运行 `bash install.sh`（无参数）。
 
@@ -48,7 +48,7 @@
 
 多账号功能由 `multi-account.sh` 单独管理，不修改现有的 `start.sh` 或单账号目录。每个账号都有独立的环境文件、每日日程、日志、PID、Firefox profile 和运行状态，无显示环境下自动走 `xvfb-run` 启动（与单账号一致）。
 
-> 交互菜单里已集成：`bash install.sh` 进菜单后选 **[9] 多账号管理**，可直接添加账号（交互填邮箱密码或指定 env 文件）、批量启停、安装每日定时、看日志，无需手动敲命令。`install` / `update` 会自动把 `multi-account.sh` 部署/更新到安装目录。
+> 交互菜单里已集成：`bash install.sh` 进菜单后选 **[9] 多账号管理**，可直接添加账号（交互填邮箱密码或 env 文件）、批量启停、安装每日定时、看日志，无需手动敲命令。`install` / `update` 会自动把 `multi-account.sh` 部署/更新到安装目录 `/root/dafaguo`。
 
 先为每个账号准备环境文件，例如 `account-a.env`：
 
@@ -85,7 +85,9 @@ chmod 600 account-a.env
 ./multi-account.sh stop                  # 停止全部账号
 ./multi-account.sh restart               # 重启全部账号
 ./multi-account.sh restart account-a     # 重启指定账号（可传多个）
-./multi-account.sh status account-a      # 查看单个账号状态
+./multi-account.sh set-proxy account-a socks5://user:pass@host:port  # 设置账号代理
+./multi-account.sh set-proxy account-a   # 清除账号代理
+./multi-account.sh status account-a      # 查看单个账号状态（含代理）
 ./multi-account.sh status                # 查看全部账号状态
 ./multi-account.sh list                  # 列出全部账号名
 ./multi-account.sh delete account-a      # 停止并删除账号及其独立数据
@@ -147,6 +149,6 @@ apt install -y xvfb
 ## 常用命令
 
 ```bash
-tail -f /opt/neoheberg-afk/neoheberg.log   # 实时日志
+tail -f /root/dafaguo/neoheberg.log   # 实时日志
 pkill -9 -f neoheberg.py                   # 停止
 ```

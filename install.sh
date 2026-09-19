@@ -15,19 +15,19 @@
 # ============================================================
 set -euo pipefail
 
-REPO_RAW="https://raw.githubusercontent.com/xxbb678/dafaguo/main"
-APP_DIR="${NEOHEBERG_DIR:-/opt/neoheberg-afk}"
+NEOHEBERG_DIR="${NEOHEBERG_DIR:-/root/dafaguo}"
+APP_DIR="${NEOHEBERG_DIR:-/root/dafaguo}"
 VENV="$APP_DIR/venv"
 SCRIPT="$APP_DIR/neoheberg.py"
 # 进程匹配模式：兼容「相对路径启动」(start.sh： ./venv/bin/python ./neoheberg.py)
 #           与「绝对路径启动」(菜单： $VENV/bin/python $SCRIPT)，避免状态误报为「已安装未运行」
-RUN_PATTERN='venv/bin/python.*neoheberg\.py'
+RUN_PATTERN='venv/bin/python.*neoheberg\\.py'
 LOG="$APP_DIR/neoheberg.log"
 ENV_FILE="$APP_DIR/env"
 PID_FILE="$APP_DIR/neoheberg.pid"
 SERVICE="neoheberg-afk"
 MULTI_SCRIPT="$APP_DIR/multi-account.sh"
-MULTI_HOME="$HOME/.local/share/dafaguo-multi"
+MULTI_HOME="${MULTI_HOME:-$HOME/.local/share/dafaguo-multi}"
 
 GREEN=$'\033[32m'; RED=$'\033[31m'; YELLOW=$'\033[33m'; CYAN=$'\033[36m'; NC=$'\033[0m'
 
@@ -917,7 +917,7 @@ schedule_install() {
 #!/bin/bash
 # 在容器内启动挂机（禁沙箱 + 脱离会话）
 # 启动前强制清理所有旧实例，避免多实例并发导致兑换不结算。
-cd /opt/neoheberg-afk || exit 1
+cd "$APP_DIR" || exit 1
 
 # ── 1. 杀掉所有旧实例（python 主程序 + xvfb-run 包装进程）──
 pkill -9 -f "venv/bin/python.*neoheberg.py" 2>/dev/null
@@ -1066,7 +1066,7 @@ require_multi() {
 
 # 添加账号：交互式填写，env 文件可输入路径，留空则直接填邮箱密码
 menu_multi_add() {
-    local name schedule envpath email pass tmp
+    local name schedule envpath email pass proxy tmp
     printf "账号名（字母/数字/下划线/连字符，如 acc-a）: "
     read -r name || name=""
     if ! [[ ${name:-} =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]; then
@@ -1077,33 +1077,65 @@ menu_multi_add() {
     if ! [[ ${schedule:-} =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
         err "时间格式不合法，已取消"; return 1
     fi
-    printf "环境文件路径（留空则直接输入邮箱密码）: "
+    printf "代理地址（可选，如 socks5://user:pass@host:port，留空=不走代理）: "
+    read -r proxy || proxy=""
+    printf "环境文件路径（留空则直接输入邮箱密码；env 文件自带 PROXY 时以文件为准）: "
     read -r envpath || envpath=""
     if [ -n "$envpath" ]; then
         [ -f "$envpath" ] || { err "环境文件不存在：$envpath"; return 1; }
-    else
-        printf "邮箱: "
-        read -r email || email=""
-        printf "密码: "
-        read -rs pass || pass=""; echo ""
-        if [ -z "$email" ] || [ -z "$pass" ]; then
-            err "邮箱或密码为空，已取消"; return 1
-        fi
-        tmp=$(mktemp) || return 1
-        umask 077
-        {
-            printf "EMAIL=%q\n" "$email"
-            printf "PASSWORD=%q\n" "$pass"
-            printf "TG_BOT_TOKEN=\n"
-            printf "TG_CHAT_ID=\n"
-            printf "NOTIFY_NAME=%q\n" "$name"
-        } > "$tmp"
-        DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" add "$name" "$schedule" "$tmp"
+        DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" add "$name" "$schedule" "$envpath"
         local rc=$?
-        rm -f "$tmp"
+        if [ $rc -eq 0 ] && [ -n "$proxy" ]; then
+            DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" set-proxy "$name" "$proxy"
+        fi
         return $rc
     fi
-    DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" add "$name" "$schedule" "$envpath"
+    printf "邮箱: "
+    read -r email || email=""
+    printf "密码: "
+    read -rs pass || pass=""; echo ""
+    if [ -z "$email" ] || [ -z "$pass" ]; then
+        err "邮箱或密码为空，已取消"; return 1
+    fi
+    tmp=$(mktemp) || return 1
+    umask 077
+    {
+        printf "EMAIL=%q\n" "$email"
+        printf "PASSWORD=%q\n" "$pass"
+        printf "TG_BOT_TOKEN=\n"
+        printf "TG_CHAT_ID=\n"
+        printf "NOTIFY_NAME=%q\n" "$name"
+        if [ -n "$proxy" ]; then
+            printf "PROXY=%q\n" "$proxy"
+        fi
+    } > "$tmp"
+    DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" add "$name" "$schedule" "$tmp"
+    local rc=$?
+    rm -f "$tmp"
+    return $rc
+}
+
+menu_multi_setproxy() {
+    local name proxy
+    printf "账号名: "
+    read -r name || name=""
+    if ! [[ ${name:-} =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]; then
+        err "账号名不合法，已取消"; return 1
+    fi
+    printf "代理地址（留空=清除代理）: "
+    read -r proxy || proxy=""
+    DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" set-proxy "$name" "$proxy"
+    local rc=$?
+    if [ $rc -eq 0 ] && [ -n "$proxy" ]; then
+        printf "是否立即重启该账号使代理生效？[y/N]: "
+        local rr
+        read -r rr || rr=""
+        case "$rr" in
+            y|Y|yes|YES) DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" restart "$name" ;;
+            *) info "未重启，可稍后选 [5] 重启" ;;
+        esac
+    fi
+    return $rc
 }
 
 menu_multi() {
@@ -1114,17 +1146,18 @@ menu_multi() {
         echo "${CYAN}=== 多账号管理 ===${NC}"
         DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" status
         echo ""
-        echo "  [1] 添加账号（设每日启动时间）"
+        echo "  [1] 添加账号（设每日启动时间/代理）"
         echo "  [2] 删除账号"
         echo "  [3] 启动全部账号"
         echo "  [4] 停止全部账号"
         echo "  [5] 重启全部账号"
         echo "  [6] 启动/停止指定账号"
-        echo "  [7] 安装每日定时（systemd 用户定时器）"
-        echo "  [8] 移除每日定时"
-        echo "  [9] 查看日志（选账号）"
+        echo "  [7] 设置/清除账号代理"
+        echo "  [8] 安装每日定时（systemd 用户定时器）"
+        echo "  [9] 移除每日定时"
+        echo "  [10] 查看日志（选账号）"
         echo "  [0] 返回"
-        printf "请选择 [0-9]: "
+        printf "请选择 [0-10]: "
         read -r c || c="0"
         case "$c" in
             1) menu_multi_add; rc=$? ;;
@@ -1148,10 +1181,11 @@ menu_multi() {
                     *) err "无效操作"; rc=1 ;;
                 esac
                 ;;
-            7) DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" install-timers
+            7) menu_multi_setproxy; rc=$? ;;
+            8) DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" install-timers
                info "注销后仍需执行，请确认已启用 linger: loginctl enable-linger $USER" ;;
-            8) DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" remove-timers ;;
-            9)
+            9) DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" remove-timers ;;
+            10)
                 printf "查看哪个账号的日志（留空=全部，f+账号名=实时跟踪，如 fa）: "
                 read -r name || name=""
                 if [ ! -d "${MULTI_HOME}/accounts" ]; then

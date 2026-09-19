@@ -165,4 +165,39 @@ out=$(run_multi start)
 out=$(run_multi stop)
 [[ "$out" == '尚未添加账号' ]] || fail "空状态 stop 输出异常：$out"
 
+# ---- 代理设置 ----
+run_multi add account_d 11:00 "$SOURCE_ENV"
+# 源 env 无 PROXY → status 显示 (无)
+out=$(run_multi status account_d)
+[[ "$out" == *'代理 (无)'* ]] || fail "无代理时 status 显示异常：$out"
+# 设置代理（输出应脱敏，env 文件存真实值）
+out=$(run_multi set-proxy account_d 'socks5://u:p@1.2.3.4:1080')
+[[ "$out" == *'代理已设置：socks5://u:****@1.2.3.4:1080'* ]] || fail "set-proxy 输出异常：$out"
+[[ "$out" != *'u:p@'* ]] || fail 'set-proxy 输出泄漏了代理密码'
+assert_contains "$DATA_DIR/accounts/account_d/account.env" 'PROXY=socks5://u:p@1.2.3.4:1080'
+assert_mode "$DATA_DIR/accounts/account_d/account.env" 600
+# status 应显示脱敏代理
+out=$(run_multi status account_d)
+[[ "$out" == *'代理 socks5://u:****@1.2.3.4:1080'* ]] || fail "有代理时 status 显示异常：$out"
+[[ "$out" != *'u:p@'* ]] || fail 'status 输出泄漏了代理密码'
+# 重复设置应替换而不是追加
+run_multi set-proxy account_d 'socks5://a:b@5.6.7.8:9050'
+count=$(grep -c '^PROXY=' "$DATA_DIR/accounts/account_d/account.env")
+[[ "$count" == "1" ]] || fail "重复 set-proxy 后 PROXY 行数应为 1，实际 $count"
+assert_contains "$DATA_DIR/accounts/account_d/account.env" 'PROXY=socks5://a:b@5.6.7.8:9050'
+# 清除代理
+out=$(run_multi set-proxy account_d)
+[[ "$out" == *'代理已清除'* ]] || fail "清除代理输出异常：$out"
+if grep -qE '^[[:space:]]*PROXY[[:space:]]*=[^[:space:]]' "$DATA_DIR/accounts/account_d/account.env"; then
+  fail "清除代理后 PROXY 仍有值"
+fi
+# 不存在的账号设置代理应失败
+if run_multi set-proxy ghost x >/dev/null 2>&1; then
+  fail "对不存在账号设置代理不应成功"
+fi
+# 凭证其余字段不受影响
+assert_contains "$DATA_DIR/accounts/account_d/account.env" 'EMAIL=test@example.com'
+assert_contains "$DATA_DIR/accounts/account_d/account.env" 'NH_WAIT=30'
+run_multi delete account_d
+
 printf '全部多账号功能测试通过\n'

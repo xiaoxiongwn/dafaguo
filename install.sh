@@ -1143,7 +1143,7 @@ menu_multi() {
     while true; do
         echo ""
         echo "${CYAN}=== 多账号管理 ===${NC}"
-        DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" status
+        DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" status || true
         echo ""
         echo "  [1] 添加账号（设每日启动时间/代理）"
         echo "  [2] 删除账号"
@@ -1157,7 +1157,7 @@ menu_multi() {
         echo "  [10] 查看日志（选账号）"
         echo "  [0] 返回"
         printf "请选择 [0-10]: "
-        read -r c || c="0"
+        read -r c || continue
         case "$c" in
             1) menu_multi_add; rc=$? ;;
             2)
@@ -1373,7 +1373,7 @@ menu() {
         echo -e "${GREEN}===============================================${NC}"
         printf "请输入数字选择 [0-8]: "
         local choice
-        read -r choice || choice="0"
+        read -r choice || continue
 
         case "$choice" in
             1) menu_install ;;

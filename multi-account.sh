@@ -168,13 +168,29 @@ start_account() {
     rm -f "$pid_file"
   fi
   log_file="$dir/logs/$(date +%F).log"
+  # 组装启动命令：无显示环境走 xvfb-run；setsid 脱离会话（SSH 断开不影响）
+  local -a launch=()
+  if command -v setsid >/dev/null 2>&1; then
+    launch+=(setsid)
+  fi
+  if [[ -z "${DISPLAY:-}" ]] && command -v xvfb-run >/dev/null 2>&1; then
+    launch+=(xvfb-run -a -s "-screen 0 1024x768x24")
+  fi
+  launch+=("$PYTHON_BIN" "$APP")
   (
     set -a
     source "$dir/account.env"
     set +a
     export BROWSER_WORK_DIR="$dir/state"
     export BROWSER_USER_DATA_DIR="$dir/firefox-profile"
-    exec "$PYTHON_BIN" "$APP" >>"$log_file" 2>&1
+    # LXC/容器内 Firefox 沙箱会导致调试端口不开，必须禁用
+    exec env \
+      MOZ_DISABLE_CONTENT_SANDBOX=1 \
+      MOZ_DISABLE_GMP_SANDBOX=1 \
+      MOZ_DISABLE_RDD_SANDBOX=1 \
+      MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1 \
+      MOZ_DISABLE_GPU_SANDBOX=1 \
+      "${launch[@]}" >>"$log_file" 2>&1
   ) &
   pid=$!
   printf '%s\n' "$pid" > "$pid_file"
@@ -193,12 +209,13 @@ stop_account() {
   fi
   read -r pid < "$pid_file" || true
   if [[ ${pid:-} =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
-    kill "$pid" 2>/dev/null || true
+    # 整组终止（setsid 启动的进程自成进程组，可带走 xvfb-run/Xvfb/Firefox 全家）
+    kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
     for _ in 1 2 3 4 5; do
       kill -0 "$pid" 2>/dev/null || break
       sleep 1
     done
-    kill -9 "$pid" 2>/dev/null || true
+    kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
   fi
   rm -f "$pid_file"
   printf '已停止账号：%s\n' "$name"

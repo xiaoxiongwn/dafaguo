@@ -7,7 +7,9 @@
 # 4 查余额（实时刷新）
 # 5 每日定时挂机
 # 6 运行状态
-# 7 卸载
+# 7 更新主脚本
+# 8 卸载
+# 9 多账号管理
 # 0 退出
 # 用法：bash <(curl -fsSL https://raw.githubusercontent.com/xxbb678/dafaguo/main/install.sh)
 # ============================================================
@@ -24,6 +26,8 @@ LOG="$APP_DIR/neoheberg.log"
 ENV_FILE="$APP_DIR/env"
 PID_FILE="$APP_DIR/neoheberg.pid"
 SERVICE="neoheberg-afk"
+MULTI_SCRIPT="$APP_DIR/multi-account.sh"
+MULTI_HOME="$HOME/.local/share/dafaguo-multi"
 
 GREEN=$'\033[32m'; RED=$'\033[31m'; YELLOW=$'\033[33m'; CYAN=$'\033[36m'; NC=$'\033[0m'
 
@@ -473,6 +477,13 @@ do_install_deps() {
         cp "$APP_DIR/neoheberg.py.local" "$SCRIPT"
     else
         curl -fsSL "$REPO_RAW/neoheberg.py" -o "$SCRIPT" || { err "脚本下载失败"; return 1; }
+    fi
+
+    # 多账号管理脚本（菜单 [9] 使用；缺失不影响单账号功能）
+    if ! curl -fsSL "$REPO_RAW/multi-account.sh" -o "$MULTI_SCRIPT" 2>/dev/null; then
+        warn "multi-account.sh 下载失败，多账号菜单暂不可用"
+    else
+        chmod +x "$MULTI_SCRIPT"
     fi
 
     # 下载后必须先适配老 Python 注解，否则语法检查/启动会直接报错
@@ -1043,11 +1054,135 @@ menu_schedule() {
     esac
 }
 
+# ---------------- 多账号管理 ----------------
+require_multi() {
+    [ -x "$MULTI_SCRIPT" ] || {
+        err "multi-account.sh 不存在（安装时下载失败？）"
+        info "可重新执行菜单 [1] 或菜单 [7] 更新后重试"
+        return 1
+    }
+    return 0
+}
+
+# 添加账号：交互式填写，env 文件可输入路径，留空则直接填邮箱密码
+menu_multi_add() {
+    local name schedule envpath email pass tmp
+    printf "账号名（字母/数字/下划线/连字符，如 acc-a）: "
+    read -r name || name=""
+    if ! [[ ${name:-} =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]; then
+        err "账号名不合法，已取消"; return 1
+    fi
+    printf "每日启动时间 HH:MM（如 06:30）: "
+    read -r schedule || schedule=""
+    if ! [[ ${schedule:-} =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+        err "时间格式不合法，已取消"; return 1
+    fi
+    printf "环境文件路径（留空则直接输入邮箱密码）: "
+    read -r envpath || envpath=""
+    if [ -n "$envpath" ]; then
+        [ -f "$envpath" ] || { err "环境文件不存在：$envpath"; return 1; }
+    else
+        printf "邮箱: "
+        read -r email || email=""
+        printf "密码: "
+        read -rs pass || pass=""; echo ""
+        if [ -z "$email" ] || [ -z "$pass" ]; then
+            err "邮箱或密码为空，已取消"; return 1
+        fi
+        tmp=$(mktemp) || return 1
+        umask 077
+        {
+            printf "EMAIL=%q\n" "$email"
+            printf "PASSWORD=%q\n" "$pass"
+            printf "TG_BOT_TOKEN=\n"
+            printf "TG_CHAT_ID=\n"
+            printf "NOTIFY_NAME=%q\n" "$name"
+        } > "$tmp"
+        DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" add "$name" "$schedule" "$tmp"
+        local rc=$?
+        rm -f "$tmp"
+        return $rc
+    fi
+    DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" add "$name" "$schedule" "$envpath"
+}
+
+menu_multi() {
+    require_multi || return 1
+    local c s name rc=0
+    while true; do
+        echo ""
+        echo "${CYAN}=== 多账号管理 ===${NC}"
+        DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" status
+        echo ""
+        echo "  [1] 添加账号（设每日启动时间）"
+        echo "  [2] 删除账号"
+        echo "  [3] 启动全部账号"
+        echo "  [4] 停止全部账号"
+        echo "  [5] 重启全部账号"
+        echo "  [6] 启动/停止指定账号"
+        echo "  [7] 安装每日定时（systemd 用户定时器）"
+        echo "  [8] 移除每日定时"
+        echo "  [9] 查看日志（选账号）"
+        echo "  [0] 返回"
+        printf "请选择 [0-9]: "
+        read -r c || c="0"
+        case "$c" in
+            1) menu_multi_add; rc=$? ;;
+            2)
+                printf "要删除的账号名: "
+                read -r name || name=""
+                [ -n "$name" ] || { err "未输入账号名"; }
+                [ -z "$name" ] || DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" delete "$name"
+                ;;
+            3) DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" start ;;
+            4) DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" stop ;;
+            5) DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" restart ;;
+            6)
+                printf "操作 [s]tart 启动 / [t]op 停止: "
+                read -r s || s=""
+                printf "账号名（多个用空格分隔，留空=全部）: "
+                read -r name || name=""
+                case "$s" in
+                    s|start)  DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" start $name ;;
+                    t|stop)   DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" stop $name ;;
+                    *) err "无效操作"; rc=1 ;;
+                esac
+                ;;
+            7) DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" install-timers
+               info "注销后仍需执行，请确认已启用 linger: loginctl enable-linger $USER" ;;
+            8) DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" remove-timers ;;
+            9)
+                printf "查看哪个账号的日志（留空=全部，f+账号名=实时跟踪，如 fa）: "
+                read -r name || name=""
+                if [ ! -d "${MULTI_HOME}/accounts" ]; then
+                    info "还没有多账号数据（$MULTI_HOME）"
+                elif [[ ${name:-} == f* && ${#name} -gt 1 ]]; then
+                    tail -f "${MULTI_HOME}/accounts/${name#f}/logs/$(date +%F).log" 2>/dev/null || err "日志不存在（账号可能还没跑过）"
+                elif [ -n "${name:-}" ]; then
+                    ls -1t "${MULTI_HOME}/accounts/$name"/logs/*.log 2>/dev/null | head -3 | sed 's/^/    /'
+                    tail -n 20 "${MULTI_HOME}/accounts/$name"/logs/$(date +%F).log 2>/dev/null || info "今日暂无日志"
+                else
+                    for d in "${MULTI_HOME}"/accounts/*/logs; do
+                        [ -d "$d" ] || continue
+                        echo "  --- ${d##*/accounts/}"
+                        ls -1t "$d"/*.log 2>/dev/null | head -2 | sed 's/^/    /'
+                    done
+                fi
+                ;;
+            0) return 0 ;;
+            *) err "无效选择" ;;
+        esac
+        echo ""
+        printf "按回车返回多账号菜单..."
+        read -r _pause || true
+    done
+}
+
 # ---------------- 4. 卸载 ----------------
 menu_uninstall() {
     echo ""
     echo "${CYAN}=== 卸载 ===${NC}"
-    printf "确定卸载 NeoHeberg AFK 吗？进程、凭证、依赖都将删除 [y/N]: "
+    printf "确定卸载 NeoHeberg AFK 吗？进程、凭证、依赖都将删除；多账号定时器会移除，多账号数据会单独询问 [y/N]: "
     local c
     read -r c || c=""
     case "$c" in
@@ -1067,6 +1202,25 @@ menu_uninstall() {
 
     if schedule_installed; then
         schedule_remove >/dev/null 2>&1 || true
+    fi
+
+    # 多账号：先移除每日定时器，再询问是否连同账号数据一起删
+    if [ -x "$MULTI_SCRIPT" ]; then
+        DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" stop >/dev/null 2>&1 || true
+        DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" remove-timers >/dev/null 2>&1 || true
+        ok "多账号定时器已移除"
+        if [ -d "$MULTI_HOME/accounts" ]; then
+            printf "是否同时删除多账号数据（账号凭证/浏览器profile/日志，$MULTI_HOME）？[y/N]: "
+            local md
+            read -r md || md=""
+            case "$md" in
+                y|Y|yes|YES)
+                    rm -rf "$MULTI_HOME"
+                    ok "多账号数据已删除"
+                    ;;
+                *) info "保留多账号数据于 $MULTI_HOME" ;;
+            esac
+        fi
     fi
 
     rm -rf "$APP_DIR"
@@ -1117,6 +1271,15 @@ menu_update() {
     mv -f "$tmp" "$SCRIPT"
     adapt_script_for_old_python || true
     ok "主脚本已更新"
+
+    # 顺带更新多账号脚本（失败不影响主流程）
+    if curl -fsSL "$REPO_RAW/multi-account.sh" -o "$APP_DIR/multi-account.sh.new" 2>/dev/null; then
+        chmod +x "$APP_DIR/multi-account.sh.new"
+        mv -f "$APP_DIR/multi-account.sh.new" "$MULTI_SCRIPT"
+        ok "multi-account.sh 已更新"
+    else
+        warn "multi-account.sh 更新失败（保留旧版）"
+    fi
 
     # 若在运行中，询问是否重启
     if pgrep -f "$RUN_PATTERN" >/dev/null 2>&1; then
@@ -1174,9 +1337,10 @@ menu() {
         echo -e " ${CYAN}[6]${NC} 运行状态"
         echo -e " ${CYAN}[7]${NC} 更新主脚本"
         echo -e " ${CYAN}[8]${NC} 卸载"
+        echo -e " ${CYAN}[9]${NC} 多账号管理"
         echo -e " ${CYAN}[0]${NC} 退出脚本"
         echo -e "${GREEN}===============================================${NC}"
-        printf "请输入数字选择 [0-8]: "
+        printf "请输入数字选择 [0-9]: "
         local choice
         read -r choice || choice="0"
 
@@ -1189,6 +1353,7 @@ menu() {
             6) menu_status ;;
             7) menu_update ;;
             8) menu_uninstall ;;
+            9) menu_multi ;;
             0) echo "已退出"; exit 0 ;;
             *) err "无效选择"; sleep 1 ;;
         esac

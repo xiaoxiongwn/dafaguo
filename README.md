@@ -46,7 +46,9 @@
 
 ## 多账号分时启动
 
-多账号功能由 `multi-account.sh` 单独管理，不修改现有的 `install.sh`、`start.sh` 或单账号目录。每个账号都有独立的环境文件、每日日程、日志、PID、Firefox profile 和运行状态。
+多账号功能由 `multi-account.sh` 单独管理，不修改现有的 `start.sh` 或单账号目录。每个账号都有独立的环境文件、每日日程、日志、PID、Firefox profile 和运行状态，无显示环境下自动走 `xvfb-run` 启动（与单账号一致）。
+
+> 交互菜单里已集成：`bash install.sh` 进菜单后选 **[9] 多账号管理**，可直接添加账号（交互填邮箱密码或指定 env 文件）、批量启停、安装每日定时、看日志，无需手动敲命令。`install` / `update` 会自动把 `multi-account.sh` 部署/更新到安装目录。
 
 先为每个账号准备环境文件，例如 `account-a.env`：
 

@@ -2,19 +2,18 @@
 # ============================================================
 # NeoHeberg AFK 交互式管理脚本
 # 1 安装依赖
-# 2 账号密码
-# 3 配置 Telegram 通知
-# 4 查余额（实时刷新）
-# 5 每日定时挂机
-# 6 运行状态
-# 7 更新主脚本
-# 8 卸载
+# 3 查余额（实时刷新）
+# 4 每日定时挂机
+# 5 运行状态
+# 6 卸载
+# 8 更新主脚本
 # 9 多账号管理
 # 0 退出
 # 用法：bash <(curl -fsSL https://raw.githubusercontent.com/xxbb678/dafaguo/main/install.sh)
 # ============================================================
 set -euo pipefail
 
+REPO_RAW="https://raw.githubusercontent.com/xxbb678/dafaguo/main"
 NEOHEBERG_DIR="${NEOHEBERG_DIR:-/root/dafaguo}"
 APP_DIR="${NEOHEBERG_DIR:-/root/dafaguo}"
 VENV="$APP_DIR/venv"
@@ -1364,13 +1363,11 @@ menu() {
         echo -e " 安装目录: $APP_DIR"
         echo -e "${GREEN}===============================================${NC}"
         echo -e " ${CYAN}[1]${NC} 安装依赖"
-        echo -e " ${CYAN}[2]${NC} 账号密码"
-        echo -e " ${CYAN}[3]${NC} 配置 Telegram 通知"
-        echo -e " ${CYAN}[4]${NC} 查余额"
-        echo -e " ${CYAN}[5]${NC} 每日定时挂机"
-        echo -e " ${CYAN}[6]${NC} 运行状态"
-        echo -e " ${CYAN}[7]${NC} 更新主脚本"
-        echo -e " ${CYAN}[8]${NC} 卸载"
+        echo -e " ${CYAN}[3]${NC} 查余额"
+        echo -e " ${CYAN}[4]${NC} 每日定时挂机"
+        echo -e " ${CYAN}[5]${NC} 运行状态"
+        echo -e " ${CYAN}[6]${NC} 卸载"
+        echo -e " ${CYAN}[8]${NC} 更新主脚本（命令行：bash install.sh update）"
         echo -e " ${CYAN}[9]${NC} 多账号管理"
         echo -e " ${CYAN}[0]${NC} 退出脚本"
         echo -e "${GREEN}===============================================${NC}"
@@ -1378,15 +1375,13 @@ menu() {
         local choice
         read -r choice || choice="0"
 
-        case "$choice" in
+                case "$choice" in
             1) menu_install ;;
-            2) menu_account ;;
-            3) menu_tg ;;
-            4) menu_balance ;;
-            5) menu_schedule ;;
-            6) menu_status ;;
-            7) menu_update ;;
-            8) menu_uninstall ;;
+            3) menu_balance ;;
+            4) menu_schedule ;;
+            5) menu_status ;;
+            6) menu_uninstall ;;
+            8) menu_update ;;
             9) menu_multi ;;
             0) echo "已退出"; exit 0 ;;
             *) err "无效选择"; sleep 1 ;;

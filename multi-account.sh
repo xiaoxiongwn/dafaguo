@@ -35,11 +35,7 @@ mask_proxy() {
   rest=${p#*://}
   userinfo=${rest%%@*}
   hostpart=${rest#*@}
-  if [[ $userinfo == *:* ]]; then
-    printf '%s://%s:****@%s' "$proto" "${userinfo%%:*}" "$hostpart"
-  else
-    printf '%s://%s@%s' "$proto" "$userinfo" "$hostpart"
-  fi
+  printf '%s://****@%s' "$proto" "$hostpart"
 }
 valid_time() { [[ ${1:-} =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; }
 account_dir() { printf '%s/%s' "$ACCOUNTS_DIR" "$1"; }

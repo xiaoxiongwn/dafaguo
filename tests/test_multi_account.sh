@@ -10,6 +10,7 @@ SOURCE_ENV="$SANDBOX/source.env"
 
 cleanup() {
   pkill -f "dafaguo-test-runner" 2>/dev/null || true
+  pkill -f "fake_sing_box" 2>/dev/null || true
   rm -rf "$SANDBOX"
 }
 trap cleanup EXIT
@@ -199,5 +200,48 @@ fi
 assert_contains "$DATA_DIR/accounts/account_d/account.env" 'EMAIL=test@example.com'
 assert_contains "$DATA_DIR/accounts/account_d/account.env" 'NH_WAIT=30'
 run_multi delete account_d
+
+# ---- vless:// 节点（sing-box 转本地 SOCKS5）----
+cat > "$SANDBOX/fake_sing_box" <<'FB'
+#!/usr/bin/env bash
+sleep 600
+FB
+chmod 700 "$SANDBOX/fake_sing_box"
+export DAFAGUO_SING_BOX_BIN="$SANDBOX/fake_sing_box"
+
+VLESS_URL='vless://bm9uZTpkMDE4MTZlMS1hNWFlLTQ2NWYtODZlOC05NWNjNzA3ODExZDdAc2Fhcy5zaW4uZmFuOjQ0Mw?path=/%3Fed%3D2560%26socks%3D12%26VnbCGymL&remarks=x&obfsParam=stt.de8.de5.net&obfs=websocket&tls=1&peer=stt.de8.de5.net&udp=1'
+run_multi add account_v 12:00 "$SOURCE_ENV"
+out=$(run_multi set-proxy account_v "$VLESS_URL")
+[[ "$out" == *'vless 节点'* && "$out" == *'127.0.0.1'* ]] || fail "set-proxy vless 输出异常：$out"
+env_v="$DATA_DIR/accounts/account_v/account.env"
+proxy_line=$(grep -E '^PROXY=' "$env_v" | tail -1)
+[[ "$proxy_line" =~ ^PROXY=socks5://127\.0\.0\.1:[0-9]+$ ]] || fail "vless 未转换为本地 socks5：$proxy_line"
+vport=${proxy_line##*:}
+[[ -f "$DATA_DIR/accounts/account_v/vless-source" ]] || fail '缺少 vless-source'
+cfg=$(ls "$DATA_DIR/sing-box/vless-"*.json 2>/dev/null | head -1)
+[[ -n "$cfg" && -f "$cfg" ]] || fail '缺少 sing-box 配置'
+grep -q 'd01816e1-a5ae-465f-86e8-95cc707811d7' "$cfg" || fail '配置缺少 uuid'
+grep -q 'saas.sin.fan' "$cfg" || fail '配置缺少服务器'
+grep -q 'stt.de8.de5.net' "$cfg" || fail '配置缺少 SNI/Host'
+grep -q '/?ed=2560&socks=12&VnbCGymL' "$cfg" || fail '配置 path 未 URL 解码'
+grep -q "\"listen_port\": $vport" "$cfg" || fail "配置端口不是 $vport"
+# status 显示 vless，且不泄漏 uuid
+out=$(run_multi status account_v)
+[[ "$out" == *'vless→socks5://127.0.0.1:'* && "$out" != *'d01816e1'* ]] || fail "status vless 显示异常：$out"
+# 重复设置同一节点：端口不变（幂等，不重复起进程）
+run_multi set-proxy account_v "$VLESS_URL" >/dev/null
+port2=$(grep -E '^PROXY=' "$env_v" | tail -1 | grep -o '[0-9]*$')
+[[ "$port2" == "$vport" ]] || fail "重复 set-proxy 端口应不变：$vport -> $port2"
+n_cfg=$(ls "$DATA_DIR/sing-box/vless-"*.json | wc -l)
+[[ "$n_cfg" == "1" ]] || fail "同一节点应只有一份配置，实际 $n_cfg"
+# 清除代理
+run_multi set-proxy account_v >/dev/null
+[[ ! -f "$DATA_DIR/accounts/account_v/vless-source" ]] || fail '清除后 vless-source 应删除'
+if grep -qE '^PROXY=.' "$env_v"; then
+  fail '清除后 PROXY 仍有值'
+fi
+run_multi delete account_v
+pkill -f "fake_sing_box" 2>/dev/null || true
+unset DAFAGUO_SING_BOX_BIN
 
 printf '全部多账号功能测试通过\n'

@@ -7,6 +7,9 @@ ACCOUNTS_DIR="$MULTI_HOME/accounts"
 SYSTEMD_DIR=${DAFAGUO_SYSTEMD_USER_DIR:-"$HOME/.config/systemd/user"}
 PYTHON_BIN=${DAFAGUO_PYTHON_BIN:-python3}
 APP="$SCRIPT_DIR/neoheberg.py"
+SING_BOX_BIN=${DAFAGUO_SING_BOX_BIN:-}
+SING_BOX_HOME="$MULTI_HOME/sing-box"
+VLESS_PORT_BASE=${DAFAGUO_VLESS_PORT_BASE:-10810}
 
 usage() {
   cat <<'EOF'
@@ -16,7 +19,7 @@ usage() {
   multi-account.sh start [账号名...]      # 不给名字则启动全部
   multi-account.sh stop [账号名...]       # 不给名字则停止全部
   multi-account.sh restart [账号名...]     # 重启（不给名字则全部）
-  multi-account.sh set-proxy <账号名> <代理地址>  # 设置账号代理，如 socks5://user:pass@host:port
+  multi-account.sh set-proxy <账号名> <代理地址>  # 设置账号代理：socks5://user:pass@host:port 或 vless://…（需 sing-box，自动转本地 SOCKS5）
   multi-account.sh set-proxy <账号名>               # 清除账号代理
   multi-account.sh status [账号名]
   multi-account.sh list                    # 列出全部账号
@@ -27,15 +30,20 @@ EOF
 
 fail() { printf '错误：%s\n' "$*" >&2; exit 1; }
 valid_name() { [[ ${1:-} =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]; }
-# 展示用代理地址：隐藏 userinfo 里的密码，避免密码出现在终端输出
+# 展示用代理地址：隐藏 userinfo 里的密码（保留用户名），避免密码出现在终端输出
 mask_proxy() {
-  local p=${1:-} proto rest userinfo hostpart
+  local p=${1:-} proto rest userinfo hostpart user
   [[ $p == *"//"* && $p == *@* ]] || { printf '%s' "$p"; return; }
   proto=${p%%://*}
   rest=${p#*://}
   userinfo=${rest%%@*}
   hostpart=${rest#*@}
-  printf '%s://****@%s' "$proto" "$hostpart"
+  user=${userinfo%%:*}
+  if [[ -n "$user" ]]; then
+    printf '%s://%s:****@%s' "$proto" "$user" "$hostpart"
+  else
+    printf '%s://****@%s' "$proto" "$hostpart"
+  fi
 }
 valid_time() { [[ ${1:-} =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; }
 account_dir() { printf '%s/%s' "$ACCOUNTS_DIR" "$1"; }
@@ -51,6 +59,172 @@ all_account_names() {
   done
 }
 has_accounts() { [[ -d "$ACCOUNTS_DIR" ]] && compgen -G "$ACCOUNTS_DIR/*" >/dev/null; }
+
+# ---- vless:// 节点支持：本机 sing-box 转成 127.0.0.1 上的 SOCKS5 ----
+sing_box_bin() {
+  if [[ -n "$SING_BOX_BIN" ]]; then printf '%s' "$SING_BOX_BIN"; return 0; fi
+  command -v sing-box >/dev/null 2>&1 && { command -v sing-box; return 0; }
+  [[ -x /usr/local/bin/sing-box ]] && { printf '/usr/local/bin/sing-box'; return 0; }
+  return 1
+}
+
+# 解析 vless:// URL，输出 TSV：uuid 主机 端口 SNI 传输 path Host头 tls(1/0)
+# 兼容两种格式：标准 vless://uuid@host:port?security=tls&type=ws&...
+# 与 Snip 风格 vless://base64(user:uuid@host:port)?peer=..&obfs=websocket&path=..
+parse_vless() {
+  python3 - "$1" <<'PY'
+import base64, sys
+from urllib.parse import urlparse, parse_qs
+
+url = sys.argv[1]
+try:
+    u = urlparse(url)
+    if u.scheme != "vless":
+        sys.exit("协议不是 vless")
+    netloc = u.netloc
+    if "@" in netloc:
+        user_info, hostpart = netloc.rsplit("@", 1)
+    else:
+        raw = netloc + "=" * (-len(netloc) % 4)
+        try:
+            decoded = base64.b64decode(raw).decode()
+        except Exception:
+            sys.exit("无法解码节点信息（不是 base64，也没有 uuid@host:port）")
+        if "@" not in decoded:
+            sys.exit("无法解析节点信息")
+        user_info, hostpart = decoded.rsplit("@", 1)
+    if ":" in hostpart:
+        host, port_s = hostpart.rsplit(":", 1)
+        port = int(port_s)
+    else:
+        host, port = hostpart, 443
+    uuid = user_info.split(":")[-1].strip()
+    if not uuid or not host:
+        sys.exit("缺少 uuid 或服务器地址")
+    q = {k: v[0] for k, v in parse_qs(u.query).items()}
+    sni = q.get("sni") or q.get("peer") or q.get("serverName") or ""
+    hosthdr = q.get("host") or q.get("Host") or q.get("obfsParam") or sni
+    t = (q.get("type") or q.get("obfs") or "tcp").lower()
+    if t in ("websocket", "ws"):
+        t = "ws"
+    elif t in ("httpupgrade",):
+        t = "httpupgrade"
+    elif t == "tcp":
+        t = "tcp"
+    else:
+        sys.exit("暂不支持的传输方式：%s（目前支持 ws/httpupgrade/tcp）" % t)
+    path = q.get("path") or ""
+    if t == "tcp" and path:
+        sys.exit("tcp 传输不应带 path 参数")
+    tls = 1 if (q.get("security") == "tls" or q.get("tls") == "1" or sni) else 0
+    if tls and not sni:
+        sni = host
+    print("\t".join([uuid, host, str(port), sni, t, path, hosthdr, str(tls)]))
+except SystemExit as e:
+    if str(e):
+        print(str(e), file=sys.stderr)
+    sys.exit(1)
+except Exception as e:
+    print("vless 解析失败：%s" % e, file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
+# 生成 sing-box 配置（vless 出站 + 本地 socks 入站）
+# 参数：config port uuid host dport sni transport path hosthdr tls
+vless_write_config() {
+  python3 - "$@" <<'PY'
+import json, sys
+config, port, uuid, host, dport, sni, t, path, hosthdr, tls = sys.argv[1:11]
+out = {
+    "type": "vless",
+    "tag": "vless-out",
+    "server": host,
+    "server_port": int(dport),
+    "uuid": uuid,
+}
+if tls == "1":
+    out["tls"] = {"enabled": True, "server_name": sni}
+if t == "ws":
+    tr = {"type": "ws"}
+    if path:
+        tr["path"] = path
+    if hosthdr:
+        tr["headers"] = {"Host": hosthdr}
+    out["transport"] = tr
+elif t == "httpupgrade":
+    tr = {"type": "httpupgrade"}
+    if path:
+        tr["path"] = path
+    if hosthdr:
+        tr["host"] = hosthdr
+    out["transport"] = tr
+doc = {
+    "log": {"level": "warning", "timestamp": True, "output": config.rsplit(".json", 1)[0] + ".log"},
+    "inbounds": [{"type": "socks", "tag": "socks-in", "listen": "127.0.0.1",
+                  "listen_port": int(port), "users": []}],
+    "outbounds": [out],
+}
+with open(config, "w") as f:
+    json.dump(doc, f, indent=2)
+PY
+}
+
+# 取 127.0.0.1 上空闲的 TCP 端口
+alloc_free_port() {
+  local p
+  for p in $(seq "$VLESS_PORT_BASE" $((VLESS_PORT_BASE + 99))); do
+    if ! (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then
+      printf '%s\n' "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# 确保某节点的 sing-box 实例在跑；$1=bin $2=config
+vless_ensure_running() {
+  local bin=$1 config=$2 pidfile pid
+  pidfile="$config.pid"
+  if [[ -f "$pidfile" ]]; then
+    read -r pid < "$pidfile" || true
+    if [[ ${pid:-} =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+    rm -f "$pidfile"
+  fi
+  mkdir -p "$(dirname "$config")"
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$bin" run -c "$config" >/dev/null 2>&1 &
+  else
+    nohup "$bin" run -c "$config" >/dev/null 2>&1 &
+  fi
+  pid=$!
+  printf '%s\n' "$pid" > "$pidfile"
+  sleep 1
+  kill -0 "$pid" 2>/dev/null || fail "sing-box 启动失败：$config（详见 ${config%.json}.log）"
+}
+
+# 核心：按 vless URL 生成配置并确保 sing-box 运行，输出本地 SOCKS 端口
+# 参数：$1=账号目录 $2=vless URL
+vless_apply() {
+  local dir=$1 url=$2 bin config id port line
+  local v_uuid v_host v_dport v_sni v_trans v_path v_hosthdr v_tls
+  bin=$(sing_box_bin) || fail '未找到 sing-box，无法启用 vless:// 节点（请先安装 sing-box）'
+  line=$(parse_vless "$url") || fail "无法解析该 vless:// 节点"
+  IFS=$'\t' read -r v_uuid v_host v_dport v_sni v_trans v_path v_hosthdr v_tls <<< "$line"
+  id=$(printf '%s' "$url" | md5sum | cut -c1-12)
+  mkdir -p "$SING_BOX_HOME"
+  config="$SING_BOX_HOME/vless-$id.json"
+  if [[ -f "$config" ]]; then
+    port=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["inbounds"][0]["listen_port"])' "$config" 2>/dev/null) || port=""
+  fi
+  [[ ${port:-} =~ ^[0-9]+$ ]] || { port=$(alloc_free_port) || fail '没有可用端口（10810-10909 全被占用）'; }
+  vless_write_config "$config" "$port" "$v_uuid" "$v_host" "$v_dport" "$v_sni" "$v_trans" "$v_path" "$v_hosthdr" "$v_tls" \
+    || fail "生成 sing-box 配置失败：$config"
+  vless_ensure_running "$bin" "$config"
+  printf '%s\n' "$port"
+}
 
 start_batch() {
   local name failed=0
@@ -184,6 +358,11 @@ start_account() {
     fi
     rm -f "$pid_file"
   fi
+  # 自恢复：该账号配置了 vless 节点时，确保对应 sing-box 实例在跑
+  # （VPS 重启后定时任务拉起账号时会自动把代理带起来）
+  if [[ -f "$dir/vless-source" ]]; then
+    vless_apply "$dir" "$(cat "$dir/vless-source")" >/dev/null
+  fi
   log_file="$dir/logs/$(date +%F).log"
   # 组装启动命令：无显示环境走 xvfb-run；setsid 脱离会话（SSH 断开不影响）
   local -a launch=()
@@ -239,11 +418,22 @@ stop_account() {
 }
 
 set_proxy() {
-  local name=${1:-} proxy=${2:-} dir env_file line tmp found=0
+  local name=${1:-} proxy=${2:-} dir env_file line tmp found=0 port
   require_account "$name"
   dir=$(account_dir "$name")
   env_file="$dir/account.env"
   [[ -f "$env_file" ]] || fail "账号凭证文件不存在：$env_file"
+  # vless:// 节点：本机 sing-box 转成 127.0.0.1 的 SOCKS5 再交给账号
+  local vless_note=0
+  if [[ $proxy == vless://* ]]; then
+    port=$(vless_apply "$dir" "$proxy")
+    printf '%s\n' "$proxy" > "$dir/vless-source"
+    chmod 600 "$dir/vless-source"
+    vless_note=1
+    proxy="socks5://127.0.0.1:$port"
+  elif [[ -z "$proxy" && -f "$dir/vless-source" ]]; then
+    rm -f "$dir/vless-source"
+  fi
   tmp=$(mktemp) || fail '无法创建临时文件'
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ $line =~ ^[[:space:]]*PROXY[[:space:]]*= ]]; then
@@ -263,7 +453,11 @@ set_proxy() {
   chmod 600 "$env_file"
   rm -f "$tmp"
   if [[ -n "$proxy" ]]; then
-    printf '账号 %s 代理已设置：%s\n' "$name" "$(mask_proxy "$proxy")"
+    if (( vless_note )); then
+      printf '账号 %s 已启用 vless 节点：本地 SOCKS5 127.0.0.1:%s\n' "$name" "$port"
+    else
+      printf '账号 %s 代理已设置：%s\n' "$name" "$(mask_proxy "$proxy")"
+    fi
   else
     printf '账号 %s 代理已清除\n' "$name"
   fi
@@ -287,6 +481,9 @@ status_one() {
   pid_file="$dir/run.pid"
   if [[ -n "$proxy_val" ]]; then
     proxy_val=$(mask_proxy "$proxy_val")
+    if [[ -f "$dir/vless-source" ]]; then
+      proxy_val="vless→$proxy_val"
+    fi
   fi
   if [[ -f "$pid_file" ]]; then
     read -r pid < "$pid_file" || true

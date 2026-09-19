@@ -171,6 +171,11 @@ start_account() {
   require_account "$name"
   dir=$(account_dir "$name")
   pid_file="$dir/run.pid"
+  # 清理该账号 profile 上残留的 Firefox 进程：
+  # 崩溃/被杀的旧实例会残留（占内存且占用 marionette 端口 2828），
+  # 导致新实例 "Could not bind to port 2828" 后连接失败。
+  pkill -9 -f "profile $dir/firefox-profile" 2>/dev/null || true
+  sleep 1
   if [[ -f "$pid_file" ]]; then
     read -r pid < "$pid_file" || true
     if [[ ${pid:-} =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
@@ -272,7 +277,7 @@ status_one() {
   schedule=$(<"$dir/schedule")
   proxy_val=""
   if [[ -f "$dir/account.env" ]]; then
-    proxy_line=$(grep -E '^[[:space:]]*PROXY[[:space:]]*=' "$dir/account.env" 2>/dev/null | tail -1)
+    proxy_line=$(grep -E '^[[:space:]]*PROXY[[:space:]]*=' "$dir/account.env" 2>/dev/null | tail -1) || true
     if [[ -n "$proxy_line" ]]; then
       proxy_val=${proxy_line#*=}
       proxy_val=${proxy_val#\"}; proxy_val=${proxy_val%\"}

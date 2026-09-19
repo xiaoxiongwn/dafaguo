@@ -1407,13 +1407,9 @@ case "${1:-}" in
     *)
         if [ -t 0 ]; then
             menu
-        elif [ -r /dev/tty ]; then
-            # 管道方式（curl ... | bash）：交互从 /dev/tty 读取
-            exec < /dev/tty
-            menu
         else
-            echo "非交互环境。可用: $0 [install|account|tg|balance|status|schedule|update|uninstall]"
-            exit 1
+            # SSH 非交互环境直接进菜单
+            menu
         fi
         ;;
 esac

@@ -415,7 +415,7 @@ menu_install() {
 
     do_install_deps || return 1
     ok "安装完成"
-    echo "    下一步：选菜单 [8] 多账号管理 或直接运行 multi-account.sh add"
+    echo "    下一步：选菜单 [2] 账号管理 或直接运行 multi-account.sh add"
 }
 
 # ---------- 账号密码 ----------
@@ -478,7 +478,7 @@ do_install_deps() {
         curl -fsSL "$REPO_RAW/neoheberg.py" -o "$SCRIPT" || { err "脚本下载失败"; return 1; }
     fi
 
-    # 多账号管理脚本（菜单 [9] 使用；缺失不影响单账号功能）
+    # 多账号管理脚本（菜单 [2] 使用；缺失不影响单账号功能）
     if ! curl -fsSL "$REPO_RAW/multi-account.sh" -o "$MULTI_SCRIPT" 2>/dev/null; then
         warn "multi-account.sh 下载失败，多账号菜单暂不可用"
     else
@@ -1065,7 +1065,7 @@ require_multi() {
 
 # 添加账号：交互式填写，env 文件可输入路径，留空则直接填邮箱密码
 menu_multi_add() {
-    local name schedule envpath email pass proxy tmp
+    local name schedule envpath email pass proxy tmp tg_token tg_chat
     printf "账号名（字母/数字/下划线/连字符，如 acc-a）: "
     read -r name || name=""
     if ! [[ ${name:-} =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]; then
@@ -1078,6 +1078,10 @@ menu_multi_add() {
     fi
     printf "代理地址（可选，如 socks5://user:pass@host:port，留空=不走代理）: "
     read -r proxy || proxy=""
+    printf "TG 机器人 Token（可选，如 123:ABC-xxx，留空=不接收通知）: "
+    read -r tg_token || tg_token=""
+    printf "TG Chat ID（可选，留空=不接收通知）: "
+    read -r tg_chat || tg_chat=""
     printf "环境文件路径（留空则直接输入邮箱密码；env 文件自带 PROXY 时以文件为准）: "
     read -r envpath || envpath=""
     if [ -n "$envpath" ]; then
@@ -1086,6 +1090,22 @@ menu_multi_add() {
         local rc=$?
         if [ $rc -eq 0 ] && [ -n "$proxy" ]; then
             DAFAGUO_MULTI_HOME="$MULTI_HOME" bash "$MULTI_SCRIPT" set-proxy "$name" "$proxy"
+        fi
+        if [ $rc -eq 0 ] && [ -n "$tg_token" ] && [ -n "$tg_chat" ]; then
+            # env 文件自带的 TG 配置若为空则补写用户输入的
+            local envf="${MULTI_HOME}/accounts/${name}/account.env" line
+            while IFS= read -r line || [ -n "$line" ]; do
+                case "$line" in
+                    TG_BOT_TOKEN=*|TG_CHAT_ID=*) ;;
+                    *) printf '%s\n' "$line" >> "${envf}.tmp" ;;
+                esac
+            done < "$envf"
+            printf 'TG_BOT_TOKEN=%q\n' "$tg_token" >> "${envf}.tmp"
+            printf 'TG_CHAT_ID=%q\n' "$tg_chat" >> "${envf}.tmp"
+            cat "${envf}.tmp" > "$envf"
+            chmod 600 "$envf"
+            rm -f "${envf}.tmp"
+            info "已为该账号写入 TG 通知配置"
         fi
         return $rc
     fi
@@ -1096,13 +1116,24 @@ menu_multi_add() {
     if [ -z "$email" ] || [ -z "$pass" ]; then
         err "邮箱或密码为空，已取消"; return 1
     fi
+    if [ -n "$tg_token" ] && [ -z "$tg_chat" ]; then
+        warn "只填了 TG Token 没填 Chat ID，将不接收通知（两者需同时填写）"
+    fi
+    if [ -z "$tg_token" ] && [ -n "$tg_chat" ]; then
+        warn "只填了 Chat ID 没填 TG Token，将不接收通知（两者需同时填写）"
+    fi
     tmp=$(mktemp) || return 1
     umask 077
     {
         printf "EMAIL=%q\n" "$email"
         printf "PASSWORD=%q\n" "$pass"
-        printf "TG_BOT_TOKEN=\n"
-        printf "TG_CHAT_ID=\n"
+        if [ -n "$tg_token" ] && [ -n "$tg_chat" ]; then
+            printf "TG_BOT_TOKEN=%q\n" "$tg_token"
+            printf "TG_CHAT_ID=%q\n" "$tg_chat"
+        else
+            printf "TG_BOT_TOKEN=\n"
+            printf "TG_CHAT_ID=\n"
+        fi
         printf "NOTIFY_NAME=%q\n" "$name"
         if [ -n "$proxy" ]; then
             printf "PROXY=%q\n" "$proxy"
@@ -1363,20 +1394,18 @@ menu() {
         echo -e " 安装目录: $APP_DIR"
         echo -e "${GREEN}===============================================${NC}"
         echo -e " ${CYAN}[1]${NC} 安装依赖"
-        echo -e " ${CYAN}[2]${NC} 电报通知"
-        echo -e " ${CYAN}[3]${NC} 账号管理"
-        echo -e " ${CYAN}[4]${NC} 卸载脚本"
+        echo -e " ${CYAN}[2]${NC} 账号管理"
+        echo -e " ${CYAN}[3]${NC} 卸载脚本"
         echo -e " ${CYAN}[0]${NC} 退出脚本"
         echo -e "${GREEN}===============================================${NC}"
-        printf "请输入数字选择 [0-4]: "
+        printf "请输入数字选择 [0-3]: "
         local choice
         read -r choice || continue
 
         case "$choice" in
             1) menu_install ;;
-            2) menu_tg ;;
-            3) menu_multi ;;
-            4) menu_uninstall ;;
+            2) menu_multi ;;
+            3) menu_uninstall ;;
             0) echo "已退出"; exit 0 ;;
             *) err "无效选择"; sleep 1 ;;
         esac

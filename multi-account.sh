@@ -488,13 +488,13 @@ status_one() {
   if [[ -f "$pid_file" ]]; then
     read -r pid < "$pid_file" || true
     if [[ ${pid:-} =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
-      printf '%s：运行中，PID %s，每日 %s，代理 %s\n' \
+      printf '%s：\033[32m运行中\033[0m，PID %s，每日 %s，代理 %s\n' \
         "$name" "$pid" "$schedule" "${proxy_val:-(无)}"
       return
     fi
     rm -f "$pid_file"
   fi
-  printf '%s：未运行，每日 %s，代理 %s\n' "$name" "$schedule" "${proxy_val:-(无)}"
+  printf '%s：\033[31m未运行\033[0m，每日 %s，代理 %s\n' "$name" "$schedule" "${proxy_val:-(无)}"
 }
 
 status_accounts() {

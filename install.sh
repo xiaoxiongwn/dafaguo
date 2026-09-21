@@ -1379,10 +1379,8 @@ adapt_script_for_old_python_check() {
 menu() {
     while true; do
         local st
-        if pgrep -f "$RUN_PATTERN" >/dev/null 2>&1; then
-            st="${GREEN}运行中${NC}"
-        elif [ -d "$APP_DIR" ]; then
-            st="${YELLOW}已安装未运行${NC}"
+        if [ -d "$APP_DIR" ]; then
+            st="${GREEN}已安装${NC}"
         else
             st="${RED}未安装${NC}"
         fi

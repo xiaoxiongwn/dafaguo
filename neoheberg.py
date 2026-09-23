@@ -493,7 +493,7 @@ def run_browser_session():
                 page.quit()
 
 
-def run_browser_session():
+def main():
     restart_count = 0
 
     while True:

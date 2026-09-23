@@ -264,7 +264,7 @@ def ensure_logged_in(page):
 # ════════════════════════════════════════════════════════════════════
 # 主战场：浏览器纯物理挂机循环
 # ════════════════════════════════════════════════════════════════════
-def main():
+def run_browser_session():
     state = load_state()
 
     if PROFILE_DIR and os.path.exists(PROFILE_DIR):
@@ -493,7 +493,7 @@ def main():
                 page.quit()
 
 
-def main():
+def run_browser_session():
     restart_count = 0
 
     while True:

@@ -460,15 +460,70 @@ def main():
                     time.sleep(3)
                     
             except Exception as e:
+                error_text = str(e).lower()
+
+                connection_lost = any(marker in error_text for marker in (
+                    "connection reset by peer",
+                    "连接已断开",
+                    "websocket 连接未建立",
+                    "websocket connection is not established",
+                    "websocket is not connected",
+                    "connection closed",
+                    "broken pipe",
+                ))
+
+                if connection_lost:
+                    log.error(
+                        f"🔌 Firefox/BiDi 连接已断开，准备重启浏览器: {e}"
+                    )
+                    raise
+
                 log.error(f"⚠️ 挂机循环抛出异常: {e}")
                 time.sleep(5)
-                
+
     except Exception as e:
         log.error(f"❌ 严重错误导致退出: {e}")
         import traceback
         traceback.print_exc()
+        raise
+
     finally:
-        if page: page.quit()
+        if page:
+            with contextlib.suppress(Exception):
+                page.quit()
+
+
+def main():
+    restart_count = 0
+
+    while True:
+        try:
+            run_browser_session()
+            return
+
+        except KeyboardInterrupt:
+            log.info("收到停止信号，程序退出")
+            raise
+
+        except SystemExit:
+            raise
+
+        except Exception as e:
+            restart_count += 1
+            delay = min(10 * restart_count, 60)
+
+            log.error(
+                f"♻️ 浏览器会话异常终止: {e}；"
+                f"将在 {delay} 秒后进行第 {restart_count} 次重建"
+            )
+
+            send_tg(
+                f"⚠️ <b>NeoHeberg 浏览器连接中断</b>\n"
+                f"正在自动重启 Firefox（第 {restart_count} 次）"
+            )
+
+            time.sleep(delay)
+
 
 if __name__ == "__main__":
     main()

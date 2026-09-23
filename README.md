@@ -12,7 +12,7 @@
 
 ## 🚀 一键安装
 
-    bash <(curl -fsSL https://raw.githubusercontent.com/xxbb678/dafaguo/main/install.sh)
+    bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxiongwn/dafaguo/main/install.sh)
 
 安装过程自动完成：装好 python3-venv / xvfb / xauth → 创建虚拟环境 → 安装 ruyipage → 下载 Firefox 运行时（约百兆，首次较慢）。
 
